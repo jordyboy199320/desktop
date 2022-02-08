@@ -45,10 +45,6 @@ interface IState {
   prevLineTokenIndex: string | null
 }
 
-type StringStreamWithLookahead = CodeMirror.StringStream & {
-  lookAhead: (n: number) => string | undefined
-}
-
 function skipLine(stream: CodeMirror.StringStream, state: IState) {
   stream.skipToEnd()
   state.diffLineIndex++
@@ -205,10 +201,7 @@ export class DiffSyntaxMode {
         return null
       }
 
-      // Hack to get the next line. We found that the StringStream has an extra
-      // property of lookAhead at run time that has what we need to access the
-      // next line. This just exposes it so we can use it.
-      const nextLine = (stream as StringStreamWithLookahead).lookAhead(1)
+      const nextLine = stream.lookAhead(1)
       const nextLineTokenIndex = nextLine !== undefined ? nextLine[0] : null
       const lineBackgroundClassNames = getDiffLineBackgroundClassNames(
         index,
