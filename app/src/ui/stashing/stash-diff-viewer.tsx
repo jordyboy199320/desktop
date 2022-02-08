@@ -8,6 +8,8 @@ import { IDiff, ImageDiffType } from '../../models/diff'
 import { Resizable } from '../resizable'
 import { StashDiffHeader } from './stash-diff-header'
 import { SeamlessDiffSwitcher } from '../diff/seamless-diff-switcher'
+import { IConstrainedValue } from '../../lib/app-state'
+import { clamp } from '../../lib/clamp'
 
 interface IStashDiffViewerProps {
   /** The stash in question. */
@@ -21,7 +23,7 @@ interface IStashDiffViewerProps {
   readonly imageDiffType: ImageDiffType
 
   /** width to use for the files list pane */
-  readonly fileListWidth: number
+  readonly fileListWidth: IConstrainedValue
   readonly repository: Repository
   readonly dispatcher: Dispatcher
 
@@ -42,6 +44,9 @@ interface IStashDiffViewerProps {
    * to change the diff presentation mode.
    */
   readonly onChangeImageDiffType: (type: ImageDiffType) => void
+
+  /** Called when the user changes the hide whitespace in diffs setting. */
+  readonly onHideWhitespaceInDiffChanged: (checked: boolean) => void
 }
 
 /**
@@ -90,8 +95,13 @@ export class StashDiffViewer extends React.PureComponent<
           showSideBySideDiff={this.props.showSideBySideDiff}
           onOpenBinaryFile={onOpenBinaryFile}
           onChangeImageDiffType={onChangeImageDiffType}
+          onHideWhitespaceInDiffChanged={
+            this.props.onHideWhitespaceInDiffChanged
+          }
         />
       ) : null
+
+    const availableWidth = clamp(fileListWidth)
 
     return (
       <section id="stash-diff-viewer">
@@ -103,7 +113,9 @@ export class StashDiffViewer extends React.PureComponent<
         />
         <div className="commit-details">
           <Resizable
-            width={this.props.fileListWidth}
+            width={fileListWidth.value}
+            minimumWidth={fileListWidth.min}
+            maximumWidth={fileListWidth.max}
             onResize={this.onResize}
             onReset={this.onReset}
           >
@@ -111,7 +123,7 @@ export class StashDiffViewer extends React.PureComponent<
               files={files}
               onSelectedFileChanged={this.onSelectedFileChanged}
               selectedFile={selectedStashedFile}
-              availableWidth={fileListWidth}
+              availableWidth={availableWidth}
             />
           </Resizable>
           {diffComponent}

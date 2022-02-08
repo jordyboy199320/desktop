@@ -46,8 +46,9 @@ import {
   getLineWidthFromDigitCount,
   getNumberOfDigits,
   getFirstAndLastClasses,
+  MaxIntraLineDiffStringLength,
 } from './diff-helpers'
-import { showContextualMenu } from '../main-process-proxy'
+import { showContextualMenu } from '../../lib/menu-item'
 import { getTokens } from './diff-syntax-mode'
 import { DiffSearchInput } from './diff-search-input'
 import { escapeRegExp } from '../../lib/helpers/regex'
@@ -57,9 +58,9 @@ import {
   expandWholeTextDiff,
 } from './text-diff-expansion'
 import { IMenuItem } from '../../lib/menu-item'
+import { HiddenBidiCharsWarning } from './hidden-bidi-chars-warning'
 
 const DefaultRowHeight = 20
-const MaxLineLengthToCalculateDiff = 240
 
 export interface ISelectionPoint {
   readonly column: DiffColumn
@@ -116,6 +117,9 @@ interface ISideBySideDiffProps {
    * Whether we'll show the diff in a side-by-side layout.
    */
   readonly showSideBySideDiff: boolean
+
+  /** Called when the user changes the hide whitespace in diffs setting. */
+  readonly onHideWhitespaceInDiffChanged: (checked: boolean) => void
 }
 
 interface ISideBySideDiffState {
@@ -237,6 +241,14 @@ export class SideBySideDiff extends React.Component<
         diff: this.props.diff,
       })
     }
+
+    // Scroll to top if we switched to a new file
+    if (
+      this.virtualListRef.current !== null &&
+      this.props.file.id !== prevProps.file.id
+    ) {
+      this.virtualListRef.current.scrollToPosition(0)
+    }
   }
 
   private canExpandDiff() {
@@ -266,6 +278,7 @@ export class SideBySideDiff extends React.Component<
 
     return (
       <div className={containerClassName} onMouseDown={this.onMouseDown}>
+        {diff.hasHiddenBidiChars && <HiddenBidiCharsWarning />}
         {this.state.isSearching && (
           <DiffSearchInput
             onSearch={this.onSearch}
@@ -333,9 +346,9 @@ export class SideBySideDiff extends React.Component<
       DiffRowType.Added
     )
 
-    const lineNumberWidth = `${getLineWidthFromDigitCount(
+    const lineNumberWidth = getLineWidthFromDigitCount(
       getNumberOfDigits(diff.maxLineNumber)
-    )}px`
+    )
 
     const rowWithTokens = this.createFullRow(row, index)
 
@@ -371,6 +384,9 @@ export class SideBySideDiff extends React.Component<
             onContextMenuText={this.onContextMenuText}
             beforeClassNames={beforeClassNames}
             afterClassNames={afterClassNames}
+            onHideWhitespaceInDiffChanged={
+              this.props.onHideWhitespaceInDiffChanged
+            }
           />
         </div>
       </CellMeasurer>
@@ -1167,8 +1183,8 @@ function getModifiedRows(
       const deletedLine = deletedLines[i]
 
       if (
-        addedLine.line.content.length < MaxLineLengthToCalculateDiff &&
-        deletedLine.line.content.length < MaxLineLengthToCalculateDiff
+        addedLine.line.content.length < MaxIntraLineDiffStringLength &&
+        deletedLine.line.content.length < MaxIntraLineDiffStringLength
       ) {
         const { before, after } = getDiffTokens(
           deletedLine.line.content,

@@ -83,6 +83,9 @@ interface ISeamlessDiffSwitcherProps {
     diff: ITextDiff,
     diffSelection: DiffSelection
   ) => void
+
+  /** Called when the user changes the hide whitespace in diffs setting. */
+  readonly onHideWhitespaceInDiffChanged: (checked: boolean) => void
 }
 
 interface ISeamlessDiffSwitcherState {
@@ -118,6 +121,15 @@ function noop() {}
 
 function isSameFile(prevFile: ChangedFile, newFile: ChangedFile) {
   return prevFile === newFile || prevFile.id === newFile.id
+}
+
+function isSameDiff(prevDiff: IDiff, newDiff: IDiff) {
+  return (
+    prevDiff === newDiff ||
+    (isTextDiff(prevDiff) &&
+      isTextDiff(newDiff) &&
+      prevDiff.text === newDiff.text)
+  )
 }
 
 function isTextDiff(diff: IDiff): diff is ITextDiff | ILargeTextDiff {
@@ -165,7 +177,7 @@ export class SeamlessDiffSwitcher extends React.Component<
   private slowLoadingTimeoutId: number | null = null
 
   /** File whose (old & new files) contents are being loaded. */
-  private loadingFile: ChangedFile | null = null
+  private loadingState: { file: ChangedFile; diff: IDiff } | null = null
 
   public constructor(props: ISeamlessDiffSwitcherProps) {
     super(props)
@@ -188,7 +200,7 @@ export class SeamlessDiffSwitcher extends React.Component<
     if (this.state.isLoadingDiff) {
       this.scheduleSlowLoadingTimeout()
     }
-    this.loadFileContentsIfNeeded()
+    this.loadFileContentsIfNeeded(null)
   }
 
   public componentWillUnmount() {
@@ -211,37 +223,50 @@ export class SeamlessDiffSwitcher extends React.Component<
       }
     }
 
-    this.loadFileContentsIfNeeded()
+    this.loadFileContentsIfNeeded(prevProps.diff)
   }
 
-  private async loadFileContentsIfNeeded() {
+  private async loadFileContentsIfNeeded(prevDiff: IDiff | null) {
     const { diff, file: fileToLoad } = this.props
 
     if (diff === null || !isTextDiff(diff)) {
       return
     }
 
+    // Have we already loaded file contents for this file and is the diff
+    // still the same, if so there's no need to do it again.
     const currentFileContents = this.state.fileContents
     if (
       currentFileContents !== null &&
-      isSameFile(currentFileContents.file, fileToLoad)
+      isSameFile(currentFileContents.file, fileToLoad) &&
+      prevDiff !== null &&
+      isSameDiff(prevDiff, diff)
     ) {
       return
     }
 
-    if (this.loadingFile !== null && isSameFile(fileToLoad, this.loadingFile)) {
+    // Are we currently loading file contents for this file and is the diff
+    // still the same? If so we can wait for that to load
+    if (
+      this.loadingState !== null &&
+      isSameFile(this.loadingState.file, fileToLoad) &&
+      isSameDiff(this.loadingState.diff, diff)
+    ) {
       return
     }
 
-    this.loadingFile = fileToLoad
+    this.loadingState = { file: fileToLoad, diff }
 
     const lineFilters = getLineFilters(diff.hunks)
     const fileContents = await getFileContents(
       this.props.repository,
-      this.props.file,
+      fileToLoad,
       lineFilters
     )
 
+    this.loadingState = null
+
+    // Has the file changed while we've been reading it?
     if (!isSameFile(fileToLoad, this.props.file)) {
       return
     }
@@ -255,8 +280,6 @@ export class SeamlessDiffSwitcher extends React.Component<
             fileContents.newContents.length
           )
         : null
-
-    this.loadingFile = null
 
     this.setState({ diff: newDiff ?? diff, fileContents })
   }
@@ -293,6 +316,7 @@ export class SeamlessDiffSwitcher extends React.Component<
       file,
       onOpenBinaryFile,
       onChangeImageDiffType,
+      onHideWhitespaceInDiffChanged,
     } = this.state.propSnapshot
 
     const className = classNames('seamless-diff-switcher', {
@@ -326,6 +350,9 @@ export class SeamlessDiffSwitcher extends React.Component<
             onDiscardChanges={isLoadingDiff ? noop : onDiscardChanges}
             onOpenBinaryFile={isLoadingDiff ? noop : onOpenBinaryFile}
             onChangeImageDiffType={isLoadingDiff ? noop : onChangeImageDiffType}
+            onHideWhitespaceInDiffChanged={
+              isLoadingDiff ? noop : onHideWhitespaceInDiffChanged
+            }
           />
         ) : null}
         {loadingIndicator}

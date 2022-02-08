@@ -1,5 +1,124 @@
 {
   "releases": {
+    "2.9.7-beta2": [
+      "[New] Initial support for system notifications when checks fail in Windows - #13655",
+      "[Fixed] Fix CLI tool on macOS Monterey - #13764. Thanks @spotlightishere!",
+      "[Improved] Upgrade to Electron v16.0.8 - #13814"
+    ],
+    "2.9.7-beta1": [
+      "[New] Initial support for system notifications when checks fail in macOS - #13655",
+      "[Added] Support pushing workflow files for GitHub Actions to GitHub Enterprise Server - #13640",
+      "[Added] Support CLion as an external editor - #13739. Thanks @Pinzauti!",
+      "[Fixed] Fix close button in full screen mode on macOS - #12838",
+      "[Fixed] Commit message dialog background styles match dialog - #13606",
+      "[Fixed] Ensure job steps on pull request check run list are always present - #13531",
+      "[Improved] Take alias into account when sorting repositories - #13429",
+      "[Improved] Upgrade to Electron v14.2.3 - #13689",
+      "[Improved] Support avatars on GitHub Enterprise Server - #13719",
+      "[Improved] Fetch before trying to follow a URL link to a specific branch - #13641. Thanks @Bestra!",
+      "[Improved] Add \"View on GitHub\" context menu option to repository list items - #13227. Thanks @lhvy!",
+      "[Improved] Signal when a commit summary is getting long - #2055. Thanks @Twixes!",
+      "[Improved] Check run group headers and checks stay in view while scrolling the sub checks or job steps. - #13532",
+      "[Improved] Remove unnecessary punctuation in appearance settings- #13715. Thanks @Pinzauti!"
+    ],
+    "2.9.6": [
+      "[Added] View and re-run the check runs for the checked out pull request.",
+      "[Fixed] Tooltip improvements and polish - #13452 #13449",
+      "[Fixed] Stashing dialog no longer hangs when initiating cherry-pick in some circumstances - #13419",
+      "[Fixed] Rebase no longer hangs after conflicts resolved when initiated through pull conflict error - #13204"
+    ],
+    "2.9.6-beta3": [
+      "[Fixed] Tooltip improvements and polish - #13452 #13449",
+      "[Improved] Add dynamic constraints for resizable components - #2745",
+      "[Improved] Remove re-run button for repositories that cannot re-run checks. - #13460"
+    ],
+    "2.9.6-beta2": [
+      "[Fixed] Stashing dialog no longer hangs when intiating cherry-pick - #13419",
+      "[Fixed] Rebase no longer hangs after conflicts resolved when intiated through pull conflict error - #13204",
+      "[Fixed] Discarding files and repositories successfully moves items to trash - #13433",
+      "[Improved] Added check runs overall completeness indicator in check run popover header - #13423"
+    ],
+    "2.9.6-beta1": [
+      "[Improved] Upgrade to Electron 13.6.2 - #12978",
+      "[Improved] Allow amending pushed commits - #13384"
+    ],
+    "2.9.5": [
+      "[Added] Add custom tooltips for quicker and more helpful information - #6384",
+      "[Added] Support PyCharm as an external editor - #13270. Thanks @stevetaggart!",
+      "[Fixed] Prevent inactive selected state from disappearing on lists - #13115",
+      "[Fixed] Fix click area to select hunk on both sides of diff - #13325. Thanks @jwbth!",
+      "[Fixed] Replace dialog animations with fade when user prefers reduced motion - #12976 #2768",
+      "[Improved] Warn users when files contain bidirectional Unicode text - #13343",
+      "[Improved] Change wording for default branch name option - #13223. Thanks @Rexogamer!"
+    ],
+    "2.9.5-beta4": [
+      "[Fixed] Enable scroll in unified diff - #13393",
+      "[Improved] Adds a re-run dialog to inform user which check runs will be re-run - #13369"
+    ],
+    "2.9.5-beta3": [
+      "[Improved] Warn users when files contain bidirectional Unicode text - #13343",
+      "[Improved] Group CI check runs by runner app and event - #13348, #13349, #13344"
+    ],
+    "2.9.5-beta2": [
+      "[Added] View the check runs for the checked out pull request.",
+      "[Fixed] Fix click area to select hunk on both sides of diff - #13325. Thanks @jwbth!"
+    ],
+    "2.9.5-beta1": [
+      "[Added] Support PyCharm as an external editor - #13270. Thanks @stevetaggart!",
+      "[Added] Add custom tooltips for quicker and more helpful information - #6384",
+      "[Fixed] Replace dialog animations with fade when user prefers reduced motion - #12976 #2768",
+      "[Fixed] Prevent inactive selected state from disappearing on lists - #13115",
+      "[Improved] Change wording for default branch name option - #13223. Thanks @Rexogamer!"
+    ],
+    "2.9.4": [
+      "[Added] Add syntax mapping for HAML - #13009. Thanks @alexanderadam!",
+      "[Added] Add support for WezTerm on macOS - #12957. Thanks @theodore-s-beers!",
+      "[Added] Add a menu item to view a committed file change on GitHub - #12492. Thanks @haykam821!",
+      "[Fixed] Diffs are scrolled to the top when switching between files - #12980",
+      "[Fixed] Fix SSH prompt for unknown hosts in some scenarios - #13050",
+      "[Fixed] Apply syntax highlighting when viewing a small change for the first time - #13004",
+      "[Fixed] Wrap long email addresses in the misattributed commit warning popover - #13044",
+      "[Fixed] Refresh diffs when application receives focus - #12962",
+      "[Fixed] Only consider tokens invalid when 401 error comes from GitHub Enterprise - #12943",
+      "[Fixed] Show \"add repo\" dialog when opening repo from CLI - #12935",
+      "[Fixed] Continue merge flow after merge conflicts are resolved with external conflict tool - #12881",
+      "[Fixed] Prevent crash on successful merge after conflicts resolved - #12888",
+      "[Fixed] Use same width for hunk expansion handles as we do for line numbers - #12887",
+      "[Fixed] Use the correct icon for diff expansion - #12882",
+      "[Improved] Add offending file name to the file exceeds size limit error - #10242. Thanks @ADustyOldMuffin!",
+      "[Improved] Show a message explaining why line selection is disabled when hiding whitespace - #12979",
+      "[Improved] Upgrade embedded Git to v2.32.0 on macOS, and to v2.32.0.windows.2 on Windows - #13000",
+      "[Improved] Remove gaps in the commit message container revealing a different background - #12900. Thanks @haykam821!",
+      "[Improved] Add clearer verbiage in the \"remove repository\" dialog - #12497. Thanks @fonsp!",
+      "[Improved] Update grammar for \"repo deletion\" and \"couldn't find pull request\" error messages - #12902. Thanks @patrykmichalik!",
+      "[Improved] Show confirmation dialog for SSH host key verification - #12894. Thanks @thsmdt!"
+    ],
+    "2.9.4-beta4": [
+      "[Added] Add syntax mapping for HAML - #13009. Thanks @alexanderadam!",
+      "[Fixed] Diffs are scrolled to the top when switching between files - #12980",
+      "[Fixed] Fix SSH prompt for unknown hosts in some scenarios - #13050",
+      "[Fixed] Apply syntax highlighting when viewing a small change for the first time - #13004",
+      "[Fixed] Wrap long email addresses in the misattributed commit warning popover - #13044",
+      "[Improved] Add offending file name to the file exceeds size limit error - #10242. Thanks @ADustyOldMuffin!",
+      "[Improved] Show a message explaining why line selection is disabled when hiding whitespace - #12979",
+      "[Improved] Show previous similar tags in the tag creation dialog - #12509. Thanks @mahezsh!"
+    ],
+    "2.9.4-beta3": [
+      "[Fixed] Refresh diffs when application receives focus - #12962",
+      "[Fixed] Tokens are not considered invalid when accessing GitHub Enterprise from outside of the company's VPN - #12943",
+      "[Improved] Upgrade embedded Git to v2.32.0 on macOS, and to v2.32.0.windows.2 on Windows - #13000"
+    ],
+    "2.9.4-beta2": [
+      "[Added] Add support for WezTerm on macOS - #12957. Thanks @theodore-s-beers!",
+      "[Fixed] Remove high-contrast specific hover effects from light and dark theme - #12952",
+      "[Fixed] Show \"add repo\" dialog when opening repo from CLI - #12935",
+      "[Fixed] Continue merge flow after merge conflicts are resolved with exterior conflict tool - #12881",
+      "[Fixed] Remove glitches when diffs are shown for the first time - #12903",
+      "[Improved] Remove gaps in the commit message container revealing a different background - #12900. Thanks @haykam821!",
+      "[Improved] Add clearer verbiage in the \"remove repository\" dialog - #12497. Thanks @fonsp!",
+      "[Improved] Update grammar for \"repo deletion\" and \"couldn't find pull request\" error messages - #12902. Thanks @patrykmichalik!",
+      "[Improved] Show confirmation dialog for SSH host key verification - #12894. Thanks @thsmdt!"
+    ],
     "2.9.4-beta1": [
       "[Added] Add a menu item to view a committed file change on GitHub - #12492. Thanks @haykam821!",
       "[Added] Customizable high contrast theme - #12833",

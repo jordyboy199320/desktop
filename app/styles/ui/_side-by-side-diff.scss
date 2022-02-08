@@ -54,6 +54,13 @@
     border-bottom: 1px solid var(--diff-border-color);
   }
 
+  .row {
+    .popover-component.whitespace-hint {
+      position: fixed;
+      width: 275px;
+    }
+  }
+
   .row .line-number {
     width: var(--width-line-number);
     flex-shrink: 0;
@@ -61,6 +68,7 @@
     color: var(--diff-line-number-color);
     display: flex;
     box-sizing: content-box;
+    position: relative;
 
     span {
       flex: 1;
@@ -168,13 +176,19 @@
     width: 50%;
     display: flex;
     flex-direction: row;
+    position: relative;
   }
 
   .before {
     color: var(--diff-delete-text-color);
     background: var(--diff-delete-background-color);
-    border-right: var(--diff-delete-border);
-    border-left: var(--diff-delete-border);
+    border-right: 1px solid var(--diff-border-color);
+
+    @include high-contrast {
+      border: var(--hc-diff-delete-border);
+      border-right: var(--diff-delete-border);
+      border-left: var(--diff-delete-border);
+    }
 
     .line-number {
       background: var(--diff-delete-gutter-background-color);
@@ -200,8 +214,12 @@
   .after {
     color: var(--diff-add-text-color);
     background: var(--diff-add-background-color);
-    border-left: var(--diff-add-border);
-    border-right: var(--diff-add-border);
+
+    @include high-contrast {
+      border: var(--hc-diff-add-border);
+      border-left: var(--diff-add-border);
+      border-right: var(--diff-add-border);
+    }
 
     .line-number {
       background: var(--diff-add-gutter-background-color);
@@ -250,7 +268,10 @@
     &.added .before,
     &.deleted .after {
       background: var(--diff-empty-row-background-color);
-      border: none;
+
+      @include high-contrast {
+        border: none;
+      }
 
       .line-number {
         background: var(--diff-empty-row-gutter-background-color);
@@ -276,7 +297,10 @@
     &.context .after {
       background: var(--diff-background-color);
       color: var(--diff-text-color);
-      border: none;
+
+      @include high-contrast {
+        border: none;
+      }
 
       .line-number {
         background: var(--diff-gutter-background-color);

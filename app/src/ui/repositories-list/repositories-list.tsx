@@ -16,7 +16,7 @@ import { Dispatcher } from '../dispatcher'
 import { Button } from '../lib/button'
 import { Octicon } from '../octicons'
 import * as OcticonSymbol from '../octicons/octicons.generated'
-import { showContextualMenu } from '../main-process-proxy'
+import { showContextualMenu } from '../../lib/menu-item'
 import { IMenuItem } from '../../lib/menu-item'
 import { PopupType } from '../../models/popup'
 import { encodePathAsUrl } from '../../lib/path'
@@ -48,6 +48,9 @@ interface IRepositoriesListProps {
 
   /** Called when the repository should be shown in Finder/Explorer/File Manager. */
   readonly onShowRepository: (repository: Repositoryish) => void
+
+  /** Called when the repository should be opened on GitHub in the default web browser. */
+  readonly onViewOnGitHub: (repository: Repositoryish) => void
 
   /** Called when the repository should be shown in the shell. */
   readonly onOpenInShell: (repository: Repositoryish) => void
@@ -137,6 +140,7 @@ export class RepositoriesList extends React.Component<
         }
         onRemoveRepository={this.props.onRemoveRepository}
         onShowRepository={this.props.onShowRepository}
+        onViewOnGitHub={this.props.onViewOnGitHub}
         onOpenInShell={this.props.onOpenInShell}
         onOpenInExternalEditor={this.props.onOpenInExternalEditor}
         onChangeRepositoryAlias={this.onChangeRepositoryAlias}

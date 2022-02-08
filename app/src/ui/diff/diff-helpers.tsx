@@ -416,3 +416,8 @@ export function getFirstAndLastClasses(
 
   return classes
 }
+/**
+ * The longest line for which we'd try to calculate a line diff, this matches
+ * GitHub.com's behavior.
+ **/
+export const MaxIntraLineDiffStringLength = 1024

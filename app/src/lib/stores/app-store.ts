@@ -1,5 +1,4 @@
 import * as Path from 'path'
-import { ipcRenderer, remote } from 'electron'
 import { pathExists } from 'fs-extra'
 import { escape } from 'querystring'
 import {
@@ -75,7 +74,10 @@ import {
 } from '../../ui/lib/application-theme'
 import {
   getAppMenu,
+  getCurrentWindowState,
+  getCurrentWindowZoomFactor,
   updatePreferredAppMenuItemLabels,
+  updateAccounts,
 } from '../../ui/main-process-proxy'
 import {
   API,
@@ -106,6 +108,7 @@ import {
   isCherryPickConflictState,
   isMergeConflictState,
   IMultiCommitOperationState,
+  IConstrainedValue,
 } from '../app-state'
 import {
   findEditorOrDefault,
@@ -182,11 +185,7 @@ import {
 } from '../shells'
 import { ILaunchStats, StatsStore } from '../stats'
 import { hasShownWelcomeFlow, markWelcomeFlowComplete } from '../welcome'
-import {
-  getWindowState,
-  WindowState,
-  windowStateChannelName,
-} from '../window-state'
+import { WindowState } from '../window-state'
 import { TypedBaseStore } from './base-store'
 import { MergeTreeResult } from '../../models/merge'
 import { promiseWithMinimumTimeout } from '../promise'
@@ -284,6 +283,14 @@ import { reorder } from '../git/reorder'
 import { DragAndDropIntroType } from '../../ui/history/drag-and-drop-intro'
 import { UseWindowsOpenSSHKey } from '../ssh/ssh'
 import { isConflictsFlow } from '../multi-commit-operation'
+import { clamp } from '../clamp'
+import { EndpointToken } from '../endpoint-token'
+import { IRefCheck } from '../ci-checks/ci-checks'
+import {
+  NotificationsStore,
+  getNotificationsEnabled,
+} from './notifications-store'
+import * as ipcRenderer from '../ipc-renderer'
 
 const LastSelectedRepositoryIDKey = 'last-selected-repository-id'
 
@@ -398,10 +405,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
    */
   private appIsFocused: boolean = false
 
-  private sidebarWidth: number = defaultSidebarWidth
-  private commitSummaryWidth: number = defaultCommitSummaryWidth
-  private stashedFilesWidth: number = defaultStashedFilesWidth
-  private windowState: WindowState
+  private sidebarWidth = constrain(defaultSidebarWidth)
+  private commitSummaryWidth = constrain(defaultCommitSummaryWidth)
+  private stashedFilesWidth = constrain(defaultStashedFilesWidth)
+
+  private windowState: WindowState | null = null
   private windowZoomFactor: number = 1
   private isUpdateAvailableBannerVisible: boolean = false
 
@@ -461,6 +469,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
   private currentDragElement: DragElement | null = null
   private lastThankYou: ILastThankYou | undefined
+  private showCIStatusPopover: boolean = false
 
   public constructor(
     private readonly gitHubUserStore: GitHubUserStore,
@@ -472,7 +481,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
     private readonly repositoriesStore: RepositoriesStore,
     private readonly pullRequestCoordinator: PullRequestCoordinator,
     private readonly repositoryStateCache: RepositoryStateCache,
-    private readonly apiRepositoriesStore: ApiRepositoriesStore
+    private readonly apiRepositoriesStore: ApiRepositoriesStore,
+    private readonly notificationsStore: NotificationsStore
   ) {
     super()
 
@@ -497,12 +507,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
       error => this.emitError(error)
     )
 
-    const browserWindow = remote.getCurrentWindow()
-    this.windowState = getWindowState(browserWindow)
+    window.addEventListener('resize', () => {
+      this.updateResizableConstraints()
+      this.emitUpdate()
+    })
 
-    this.onWindowZoomFactorChanged(browserWindow.webContents.zoomFactor)
-
-    this.wireupIpcEventHandlers(browserWindow)
+    this.initializeWindowState()
+    this.initializeZoomFactor()
+    this.wireupIpcEventHandlers()
     this.wireupStoreEventHandlers()
     getAppMenu()
     this.tutorialAssessor = new OnboardingTutorialAssessor(
@@ -533,6 +545,27 @@ export class AppStore extends TypedBaseStore<IAppState> {
     }, InitialRepositoryIndicatorTimeout)
 
     API.onTokenInvalidated(this.onTokenInvalidated)
+
+    this.notificationsStore.onChecksFailedNotification(
+      this.onChecksFailedNotification
+    )
+  }
+
+  private initializeWindowState = async () => {
+    const currentWindowState = await getCurrentWindowState()
+    if (currentWindowState === undefined) {
+      return
+    }
+
+    this.windowState = currentWindowState
+  }
+
+  private initializeZoomFactor = async () => {
+    const zoomFactor = await getCurrentWindowZoomFactor()
+    if (zoomFactor === undefined) {
+      return
+    }
+    this.onWindowZoomFactorChanged(zoomFactor)
   }
 
   private onTokenInvalidated = (endpoint: string) => {
@@ -637,25 +670,17 @@ export class AppStore extends TypedBaseStore<IAppState> {
     await this.updateCurrentTutorialStep(repository)
   }
 
-  private wireupIpcEventHandlers(window: Electron.BrowserWindow) {
-    ipcRenderer.on(
-      windowStateChannelName,
-      (event: Electron.IpcRendererEvent, windowState: WindowState) => {
-        this.windowState = windowState
-        this.emitUpdate()
-      }
-    )
+  private wireupIpcEventHandlers() {
+    ipcRenderer.on('window-state-changed', (_, windowState) => {
+      this.windowState = windowState
+      this.emitUpdate()
+    })
 
     ipcRenderer.on('zoom-factor-changed', (event: any, zoomFactor: number) => {
       this.onWindowZoomFactorChanged(zoomFactor)
     })
 
-    ipcRenderer.on(
-      'app-menu',
-      (event: Electron.IpcRendererEvent, { menu }: { menu: IMenu }) => {
-        this.setAppMenu(menu)
-      }
-    )
+    ipcRenderer.on('app-menu', (_, menu) => this.setAppMenu(menu))
   }
 
   private wireupStoreEventHandlers() {
@@ -681,6 +706,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     this.accountsStore.onDidUpdate(accounts => {
       this.accounts = accounts
+      const endpointTokens = accounts.map<EndpointToken>(
+        ({ endpoint, token }) => ({ endpoint, token })
+      )
+
+      updateAccounts(endpointTokens)
+
       this.emitUpdate()
     })
     this.accountsStore.onDidError(error => this.emitError(error))
@@ -708,8 +739,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   /** Load the emoji from disk. */
-  public loadEmoji() {
-    const rootDir = getAppPath()
+  public async loadEmoji() {
+    const rootDir = await getAppPath()
     readEmoji(rootDir)
       .then(emoji => {
         this.emoji = emoji
@@ -759,6 +790,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.windowZoomFactor = zoomFactor
 
     if (zoomFactor !== current) {
+      this.updateResizableConstraints()
       this.emitUpdate()
     }
   }
@@ -853,6 +885,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
       dragAndDropIntroTypesShown: this.dragAndDropIntroTypesShown,
       currentDragElement: this.currentDragElement,
       lastThankYou: this.lastThankYou,
+      showCIStatusPopover: this.showCIStatusPopover,
+      notificationsEnabled: getNotificationsEnabled(),
     }
   }
 
@@ -1493,6 +1527,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
     // insight into who our users are and what kinds of work they do
     this.updateBranchProtectionsFromAPI(repository)
 
+    this.notificationsStore.selectRepository(repository)
+
     return this._selectRepositoryRefreshTasks(
       refreshedRepository,
       previouslySelectedRepository
@@ -1748,15 +1784,17 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     this.updateRepositorySelectionAfterRepositoriesChanged()
 
-    this.sidebarWidth = getNumber(sidebarWidthConfigKey, defaultSidebarWidth)
-    this.commitSummaryWidth = getNumber(
-      commitSummaryWidthConfigKey,
-      defaultCommitSummaryWidth
+    this.sidebarWidth = constrain(
+      getNumber(sidebarWidthConfigKey, defaultSidebarWidth)
     )
-    this.stashedFilesWidth = getNumber(
-      stashedFilesWidthConfigKey,
-      defaultStashedFilesWidth
+    this.commitSummaryWidth = constrain(
+      getNumber(commitSummaryWidthConfigKey, defaultCommitSummaryWidth)
     )
+    this.stashedFilesWidth = constrain(
+      getNumber(stashedFilesWidthConfigKey, defaultStashedFilesWidth)
+    )
+
+    this.updateResizableConstraints()
 
     this.askToMoveToApplicationsFolderSetting = getBoolean(
       askToMoveToApplicationsFolderKey,
@@ -1818,7 +1856,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     this.currentTheme =
       this.selectedTheme !== ApplicationTheme.HighContrast
-        ? getCurrentlyAppliedTheme()
+        ? await getCurrentlyAppliedTheme()
         : this.selectedTheme
 
     themeChangeMonitor.onThemeChanged(theme => {
@@ -1845,6 +1883,44 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.emitUpdateNow()
 
     this.accountsStore.refresh()
+  }
+
+  /**
+   * Calculate the constraints of our resizable panes whenever the window
+   * dimensions change.
+   */
+  private updateResizableConstraints() {
+    // The combined width of the branch dropdown and the push pull fetch button
+    // Since the repository list toolbar button width is tied to the width of
+    // the sidebar we can't let it push the branch, and push/pull/fetch buttons
+    // off screen.
+    const toolbarButtonsWidth = 460
+
+    // Start with all the available width
+    let available = window.innerWidth
+
+    // Working our way from left to right (i.e. giving priority to the leftmost
+    // pane when we need to constrain the width)
+    //
+    // 220 was determined as the minimum value since it is the smallest width
+    // that will still fit the placeholder text in the branch selector textbox
+    // of the history tab
+    const maxSidebarWidth = available - toolbarButtonsWidth
+    this.sidebarWidth = constrain(this.sidebarWidth, 220, maxSidebarWidth)
+
+    // Now calculate the width we have left to distribute for the other panes
+    available -= clamp(this.sidebarWidth)
+
+    // This is a pretty silly width for a diff but it will fit ~9 chars per line
+    // in unified mode after subtracting the width of the unified gutter and ~4
+    // chars per side in split diff mode. No one would want to use it this way
+    // but it doesn't break the layout and it allows users to temporarily
+    // maximize the width of the file list to see long path names.
+    const diffPaneMinWidth = 150
+    const filesMax = available - diffPaneMinWidth
+
+    this.commitSummaryWidth = constrain(this.commitSummaryWidth, 100, filesMax)
+    this.stashedFilesWidth = constrain(this.stashedFilesWidth, 100, filesMax)
   }
 
   private updateSelectedExternalEditor(
@@ -2670,7 +2746,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
         this.repositoryStateCache.update(repository, () => {
           return {
-            isAmending: false,
+            commitToAmend: null,
           }
         })
 
@@ -2681,11 +2757,33 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
         // Do not await for refreshing the repository, otherwise this will block
         // the commit button unnecessarily for a long time in big repos.
-        this._refreshRepository(repository)
+        this._refreshRepositoryAfterCommit(
+          repository,
+          result,
+          state.commitToAmend
+        )
       }
 
       return result !== undefined
     })
+  }
+
+  private async _refreshRepositoryAfterCommit(
+    repository: Repository,
+    newCommitSha: string,
+    amendedCommit: Commit | null
+  ) {
+    await this._refreshRepository(repository)
+
+    const amendedCommitSha = amendedCommit?.sha
+
+    if (amendedCommitSha !== undefined && newCommitSha !== amendedCommitSha) {
+      const newState = this.repositoryStateCache.get(repository)
+      const newTip = newState.branchesState.tip
+      if (newTip.kind === TipState.Valid) {
+        this._addBranchToForcePushList(repository, newTip, amendedCommitSha)
+      }
+    }
   }
 
   private async _recordCommitStats(
@@ -3097,6 +3195,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
     setBoolean(UseWindowsOpenSSHKey, useWindowsOpenSSH)
     this.useWindowsOpenSSH = useWindowsOpenSSH
 
+    this.emitUpdate()
+  }
+
+  public _setNotificationsEnabled(notificationsEnabled: boolean) {
+    this.notificationsStore.setNotificationsEnabled(notificationsEnabled)
     this.emitUpdate()
   }
 
@@ -4151,7 +4254,6 @@ export class AppStore extends TypedBaseStore<IAppState> {
       await fastForwardBranches(repository, eligibleBranches)
     } catch (e) {
       log.error('Branch fast-forwarding failed', e)
-      sendNonFatalException('fastForwardBranches', e)
     }
   }
 
@@ -4267,10 +4369,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
     return this._refreshRepository(repository)
   }
 
-  public _setAmendingRepository(repository: Repository, amending: boolean) {
+  public _setRepositoryCommitToAmend(
+    repository: Repository,
+    commit: Commit | null
+  ) {
     this.repositoryStateCache.update(repository, () => {
       return {
-        isAmending: amending,
+        commitToAmend: commit,
       }
     })
 
@@ -4497,32 +4602,39 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   public _setSidebarWidth(width: number): Promise<void> {
-    this.sidebarWidth = width
+    this.sidebarWidth = { ...this.sidebarWidth, value: width }
     setNumber(sidebarWidthConfigKey, width)
+    this.updateResizableConstraints()
     this.emitUpdate()
 
     return Promise.resolve()
   }
 
   public _resetSidebarWidth(): Promise<void> {
-    this.sidebarWidth = defaultSidebarWidth
+    this.sidebarWidth = { ...this.sidebarWidth, value: defaultSidebarWidth }
     localStorage.removeItem(sidebarWidthConfigKey)
+    this.updateResizableConstraints()
     this.emitUpdate()
 
     return Promise.resolve()
   }
 
   public _setCommitSummaryWidth(width: number): Promise<void> {
-    this.commitSummaryWidth = width
+    this.commitSummaryWidth = { ...this.commitSummaryWidth, value: width }
     setNumber(commitSummaryWidthConfigKey, width)
+    this.updateResizableConstraints()
     this.emitUpdate()
 
     return Promise.resolve()
   }
 
   public _resetCommitSummaryWidth(): Promise<void> {
-    this.commitSummaryWidth = defaultCommitSummaryWidth
+    this.commitSummaryWidth = {
+      ...this.commitSummaryWidth,
+      value: defaultCommitSummaryWidth,
+    }
     localStorage.removeItem(commitSummaryWidthConfigKey)
+    this.updateResizableConstraints()
     this.emitUpdate()
 
     return Promise.resolve()
@@ -5093,7 +5205,6 @@ export class AppStore extends TypedBaseStore<IAppState> {
    * resolve when `_completeOpenInDesktop` is called.
    */
   public _startOpenInDesktop(fn: () => void): Promise<Repository | null> {
-    // tslint:disable-next-line:promise-must-complete
     const p = new Promise<Repository | null>(
       resolve => (this.resolveOpenInDesktop = resolve)
     )
@@ -5265,12 +5376,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
   ): Promise<void> {
     try {
       if (moveToTrash) {
-        const deleted = shell.moveItemToTrash(repository.path)
+        try {
+          await shell.moveItemToTrash(repository.path)
+        } catch (error) {
+          log.error('Failed moving repository to trash', error)
 
-        if (!deleted) {
           this.emitError(
             new Error(
-              `Failed moving repository directory to ${TrashNameLabel}.\n\nA common reason for this is if a file or directory is open in another program.`
+              `Failed to move the repository directory to ${TrashNameLabel}.\n\nA common reason for this is that the directory or one of its files is open in another program.`
             )
           )
           return
@@ -5544,13 +5657,18 @@ export class AppStore extends TypedBaseStore<IAppState> {
     if (currentPullRequest === null) {
       return
     }
-    const { htmlURL: baseRepoUrl } = currentPullRequest.base.gitHubRepository
+
+    return this._showPullRequestByPR(currentPullRequest)
+  }
+
+  public async _showPullRequestByPR(pr: PullRequest): Promise<void> {
+    const { htmlURL: baseRepoUrl } = pr.base.gitHubRepository
 
     if (baseRepoUrl === null) {
       return
     }
 
-    const showPrUrl = `${baseRepoUrl}/pull/${currentPullRequest.pullRequestNumber}`
+    const showPrUrl = `${baseRepoUrl}/pull/${pr.pullRequestNumber}`
 
     await this._openInBrowser(showPrUrl)
   }
@@ -5756,7 +5874,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       this.emitError(
         new Error(
           `Couldn't find branch '${headRefName}' in remote '${remote.name}'. ` +
-            `A common cause for this is if the PR author has deleted their ` +
+            `A common reason for this is that the PR author has deleted their ` +
             `branch or their forked repository.`
         )
       )
@@ -5984,16 +6102,21 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
   /** This shouldn't be called directly. See `Dispatcher`. */
   public _setStashedFilesWidth(width: number): Promise<void> {
-    this.stashedFilesWidth = width
+    this.stashedFilesWidth = { ...this.stashedFilesWidth, value: width }
     setNumber(stashedFilesWidthConfigKey, width)
+    this.updateResizableConstraints()
     this.emitUpdate()
 
     return Promise.resolve()
   }
 
   public _resetStashedFilesWidth(): Promise<void> {
-    this.stashedFilesWidth = defaultStashedFilesWidth
+    this.stashedFilesWidth = {
+      ...this.stashedFilesWidth,
+      value: defaultStashedFilesWidth,
+    }
     localStorage.removeItem(stashedFilesWidthConfigKey)
+    this.updateResizableConstraints()
     this.emitUpdate()
 
     return Promise.resolve()
@@ -6062,7 +6185,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       await this.statsStore.recordTutorialStarted()
 
       const name = 'desktop-tutorial'
-      const path = Path.resolve(getDefaultDir(), name)
+      const path = Path.resolve(await getDefaultDir(), name)
 
       const apiRepository = await createTutorialRepository(
         account,
@@ -6557,7 +6680,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       stateAfter.branchesState.tip.kind === TipState.Valid &&
       kind !== MultiCommitOperationKind.CherryPick
     ) {
-      this._addRebasedBranchToForcePushList(
+      this._addBranchToForcePushList(
         repository,
         stateAfter.branchesState.tip,
         tip.branch.tip.sha
@@ -6570,28 +6693,28 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */
-  public _addRebasedBranchToForcePushList = (
+  public _addBranchToForcePushList = (
     repository: Repository,
     tipWithBranch: IValidBranch,
-    beforeRebaseSha: string
+    beforeChangeSha: string
   ) => {
     // if the commit id of the branch is unchanged, it can be excluded from
     // this list
-    if (tipWithBranch.branch.tip.sha === beforeRebaseSha) {
+    if (tipWithBranch.branch.tip.sha === beforeChangeSha) {
       return
     }
 
     const currentState = this.repositoryStateCache.get(repository)
-    const { rebasedBranches } = currentState.branchesState
+    const { forcePushBranches } = currentState.branchesState
 
-    const updatedMap = new Map<string, string>(rebasedBranches)
+    const updatedMap = new Map<string, string>(forcePushBranches)
     updatedMap.set(
       tipWithBranch.branch.nameWithoutRemote,
       tipWithBranch.branch.tip.sha
     )
 
     this.repositoryStateCache.updateBranchesState(repository, () => ({
-      rebasedBranches: updatedMap,
+      forcePushBranches: updatedMap,
     }))
   }
 
@@ -6730,6 +6853,70 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     this.emitUpdate()
   }
+
+  public _setShowCIStatusPopover(showCIStatusPopover: boolean) {
+    if (this.showCIStatusPopover !== showCIStatusPopover) {
+      this.showCIStatusPopover = showCIStatusPopover
+      this.emitUpdate()
+    }
+  }
+
+  public _toggleCIStatusPopover() {
+    this.showCIStatusPopover = !this.showCIStatusPopover
+    this.emitUpdate()
+  }
+
+  private onChecksFailedNotification = async (
+    repository: RepositoryWithGitHubRepository,
+    pullRequest: PullRequest,
+    commitMessage: string,
+    commitSha: string,
+    checks: ReadonlyArray<IRefCheck>
+  ) => {
+    const selectedRepository =
+      this.selectedRepository ?? (await this._selectRepository(repository))
+
+    const popup: Popup = {
+      type: PopupType.PullRequestChecksFailed,
+      pullRequest,
+      repository,
+      needsSelectRepository: true,
+      commitMessage,
+      commitSha,
+      checks,
+    }
+
+    // If the repository doesn't match the one from the notification, just show
+    // the popup which will suggest to switch to that repo.
+    if (
+      selectedRepository === null ||
+      selectedRepository.hash !== repository.hash
+    ) {
+      this.statsStore.recordChecksFailedDialogOpen()
+      return this._showPopup(popup)
+    }
+
+    const state = this.repositoryStateCache.get(repository)
+
+    const { branchesState } = state
+    const { tip } = branchesState
+    const currentBranch = tip.kind === TipState.Valid ? tip.branch : null
+
+    if (currentBranch !== null && currentBranch.name === pullRequest.head.ref) {
+      // If it's the same branch, just show the existing CI check run popover
+      this._setShowCIStatusPopover(true)
+    } else {
+      this.statsStore.recordChecksFailedDialogOpen()
+
+      // If there is no current branch or it's different than the PR branch,
+      // show the checks failed dialog, but it won't offer to switch to the
+      // repository.
+      return this._showPopup({
+        ...popup,
+        needsSelectRepository: false,
+      })
+    }
+  }
 }
 
 /**
@@ -6787,4 +6974,12 @@ function isLocalChangesOverwrittenError(error: Error): boolean {
     error instanceof GitError &&
     error.result.gitError === DugiteError.LocalChangesOverwritten
   )
+}
+
+function constrain(
+  value: IConstrainedValue | number,
+  min = -Infinity,
+  max = Infinity
+): IConstrainedValue {
+  return { value: typeof value === 'number' ? value : value.value, min, max }
 }

@@ -22,9 +22,11 @@ import {
 } from '../local-storage'
 import { PushOptions } from '../git'
 import { getShowSideBySideDiff } from '../../ui/lib/diff-mode'
-import { remote } from 'electron'
-import { Architecture, getArchitecture } from '../get-architecture'
+import { getAppArchitecture } from '../../ui/main-process-proxy'
+import { Architecture } from '../get-architecture'
 import { MultiCommitOperationKind } from '../../models/multi-commit-operation'
+import { getNotificationsEnabled } from '../stores/notifications-store'
+import { isInApplicationFolder } from '../../ui/main-process-proxy'
 
 const StatsEndpoint = 'https://central.github.com/api/usage/desktop'
 
@@ -174,6 +176,15 @@ const DefaultDailyMeasures: IDailyMeasures = {
   squashMergeSuccessfulCount: 0,
   squashMergeInvokedCount: 0,
   resetToCommitCount: 0,
+  opensCheckRunsPopover: 0,
+  viewsCheckOnline: 0,
+  viewsCheckJobStepOnline: 0,
+  rerunsChecks: 0,
+  checksFailedNotificationCount: 0,
+  checksFailedNotificationClicked: 0,
+  checksFailedDialogOpenCount: 0,
+  checksFailedDialogSwitchToPullRequestCount: 0,
+  checksFailedDialogRerunChecksCount: 0,
 }
 
 interface IOnboardingStats {
@@ -342,6 +353,9 @@ interface ICalculatedStats {
    * only relevant on macOS, null will be sent otherwise.
    */
   readonly launchedFromApplicationsFolder: boolean | null
+
+  /** Whether or not the user has enabled high-signal notifications */
+  readonly notificationsEnabled: boolean
 }
 
 type DailyStats = ICalculatedStats &
@@ -509,18 +523,20 @@ export class StatsStore implements IStatsStore {
     const diffMode = getShowSideBySideDiff() ? 'split' : 'unified'
 
     // isInApplicationsFolder is undefined when not running on Darwin
-    const launchedFromApplicationsFolder =
-      remote.app.isInApplicationsFolder?.() ?? null
+    const launchedFromApplicationsFolder = __DARWIN__
+      ? await isInApplicationFolder()
+      : null
 
     return {
       eventType: 'usage',
       version: getVersion(),
       osVersion: getOS(),
       platform: process.platform,
-      architecture: getArchitecture(remote.app),
+      architecture: await getAppArchitecture(),
       theme: getPersistedThemeName(),
       selectedTerminalEmulator,
       selectedTextEditor,
+      notificationsEnabled: getNotificationsEnabled(),
       ...launchStats,
       ...dailyMeasures,
       ...userType,
@@ -1702,6 +1718,62 @@ export class StatsStore implements IStatsStore {
   public recordSquashMergeInvokedCount(): Promise<void> {
     return this.updateDailyMeasures(m => ({
       squashMergeInvokedCount: m.squashMergeInvokedCount + 1,
+    }))
+  }
+
+  public recordCheckRunsPopoverOpened(): Promise<void> {
+    return this.updateDailyMeasures(m => ({
+      opensCheckRunsPopover: m.opensCheckRunsPopover + 1,
+    }))
+  }
+
+  public recordCheckViewedOnline(): Promise<void> {
+    return this.updateDailyMeasures(m => ({
+      viewsCheckOnline: m.viewsCheckOnline + 1,
+    }))
+  }
+
+  public recordCheckJobStepViewedOnline(): Promise<void> {
+    return this.updateDailyMeasures(m => ({
+      viewsCheckJobStepOnline: m.viewsCheckJobStepOnline + 1,
+    }))
+  }
+
+  public recordRerunChecks(): Promise<void> {
+    return this.updateDailyMeasures(m => ({
+      rerunsChecks: m.rerunsChecks + 1,
+    }))
+  }
+
+  public recordChecksFailedNotificationShown(): Promise<void> {
+    return this.updateDailyMeasures(m => ({
+      checksFailedNotificationCount: m.checksFailedNotificationCount + 1,
+    }))
+  }
+
+  public recordChecksFailedNotificationClicked(): Promise<void> {
+    return this.updateDailyMeasures(m => ({
+      checksFailedNotificationClicked: m.checksFailedNotificationClicked + 1,
+    }))
+  }
+
+  public recordChecksFailedDialogOpen(): Promise<void> {
+    return this.updateDailyMeasures(m => ({
+      checksFailedDialogOpenCount: m.checksFailedDialogOpenCount + 1,
+    }))
+  }
+
+  public recordChecksFailedDialogSwitchToPullRequest(): Promise<void> {
+    return this.updateDailyMeasures(m => ({
+      checksFailedDialogSwitchToPullRequestCount:
+        m.checksFailedDialogSwitchToPullRequestCount + 1,
+    }))
+  }
+
+  public recordChecksFailedDialogRerunChecks(): Promise<void> {
+    return this.updateDailyMeasures(m => ({
+      checksFailedDialogRerunChecksCount:
+        m.checksFailedDialogRerunChecksCount + 1,
     }))
   }
 

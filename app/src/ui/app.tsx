@@ -1,8 +1,6 @@
 import * as React from 'react'
 import * as crypto from 'crypto'
-import { ipcRenderer, remote } from 'electron'
 import { TransitionGroup, CSSTransition } from 'react-transition-group'
-
 import {
   IAppState,
   RepositorySectionTab,
@@ -19,7 +17,6 @@ import { RetryAction } from '../models/retry-actions'
 import { shouldRenderApplicationMenu } from './lib/features'
 import { matchExistingRepository } from '../lib/repository-matching'
 import { getDotComAPIEndpoint } from '../lib/api'
-import { ILaunchStats } from '../lib/stats'
 import { getVersion, getName } from './lib/app-proxy'
 import { getOS } from '../lib/get-os'
 import { validatedRepositoryPath } from '../lib/stores/helpers/validated-repository-path'
@@ -55,7 +52,12 @@ import {
 } from './toolbar'
 import { iconForRepository, OcticonSymbolType } from './octicons'
 import * as OcticonSymbol from './octicons/octicons.generated'
-import { showCertificateTrustDialog, sendReady } from './main-process-proxy'
+import {
+  showCertificateTrustDialog,
+  sendReady,
+  isInApplicationFolder,
+  selectAllWindowContents,
+} from './main-process-proxy'
 import { DiscardChanges } from './discard-changes'
 import { Welcome } from './welcome'
 import { AppMenuBar } from './app-menu'
@@ -142,7 +144,12 @@ import { AddSSHHost } from './ssh/add-ssh-host'
 import { SSHKeyPassphrase } from './ssh/ssh-key-passphrase'
 import { getMultiCommitOperationChooseBranchStep } from '../lib/multi-commit-operation'
 import { ConfirmForcePush } from './rebase/confirm-force-push'
-import { setAlmostImmediate } from '../lib/set-almost-immediate'
+import { PullRequestChecksFailed } from './notifications/pull-request-checks-failed'
+import { CICheckRunRerunDialog } from './check-runs/ci-check-run-rerun-dialog'
+import { WarnForcePushDialog } from './multi-commit-operation/dialog/warn-force-push-dialog'
+import { clamp } from '../lib/clamp'
+import * as ipcRenderer from '../lib/ipc-renderer'
+import { showNotification } from '../lib/stores/helpers/show-notification'
 
 const MinuteInMilliseconds = 1000 * 60
 const HourInMilliseconds = MinuteInMilliseconds * 60
@@ -240,21 +247,13 @@ export class App extends React.Component<IAppProps, IAppState> {
       props.dispatcher.postError(error)
     })
 
-    ipcRenderer.on(
-      'menu-event',
-      (event: Electron.IpcRendererEvent, { name }: { name: MenuEvent }) => {
-        this.onMenuEvent(name)
-      }
-    )
+    ipcRenderer.on('menu-event', (_, name) => this.onMenuEvent(name))
 
     updateStore.onDidChange(state => {
       const status = state.status
 
       if (
-        !(
-          __RELEASE_CHANNEL__ === 'development' ||
-          __RELEASE_CHANNEL__ === 'test'
-        ) &&
+        !(__RELEASE_CHANNEL__ === 'development') &&
         status === UpdateStatus.UpdateReady
       ) {
         this.props.dispatcher.setUpdateBannerVisibility(true)
@@ -267,37 +266,21 @@ export class App extends React.Component<IAppProps, IAppState> {
       this.props.dispatcher.postError(error)
     })
 
-    ipcRenderer.on(
-      'launch-timing-stats',
-      (
-        event: Electron.IpcRendererEvent,
-        { stats }: { stats: ILaunchStats }
-      ) => {
-        console.info(`App ready time: ${stats.mainReadyTime}ms`)
-        console.info(`Load time: ${stats.loadTime}ms`)
-        console.info(`Renderer ready time: ${stats.rendererReadyTime}ms`)
+    ipcRenderer.on('launch-timing-stats', (_, stats) => {
+      console.info(`App ready time: ${stats.mainReadyTime}ms`)
+      console.info(`Load time: ${stats.loadTime}ms`)
+      console.info(`Renderer ready time: ${stats.rendererReadyTime}ms`)
 
-        this.props.dispatcher.recordLaunchStats(stats)
-      }
-    )
+      this.props.dispatcher.recordLaunchStats(stats)
+    })
 
-    ipcRenderer.on(
-      'certificate-error',
-      (
-        event: Electron.IpcRendererEvent,
-        {
-          certificate,
-          error,
-          url,
-        }: { certificate: Electron.Certificate; error: string; url: string }
-      ) => {
-        this.props.dispatcher.showPopup({
-          type: PopupType.UntrustedCertificate,
-          certificate,
-          url,
-        })
-      }
-    )
+    ipcRenderer.on('certificate-error', (_, certificate, error, url) => {
+      this.props.dispatcher.showPopup({
+        type: PopupType.UntrustedCertificate,
+        certificate,
+        url,
+      })
+    })
 
     dragAndDropManager.onDragEnded(this.onDragEnd)
   }
@@ -306,7 +289,7 @@ export class App extends React.Component<IAppProps, IAppState> {
     window.clearInterval(this.updateIntervalHandle)
   }
 
-  private performDeferredLaunchActions() {
+  private async performDeferredLaunchActions() {
     // Loading emoji is super important but maybe less important that loading
     // the app. So defer it until we have some breathing space.
     this.props.appStore.loadEmoji()
@@ -316,8 +299,14 @@ export class App extends React.Component<IAppProps, IAppState> {
 
     this.props.dispatcher.installGlobalLFSFilters(false)
 
-    setInterval(() => this.checkForUpdates(true), UpdateCheckInterval)
-    this.checkForUpdates(true)
+    // We only want to automatically check for updates on beta and prod
+    if (
+      __RELEASE_CHANNEL__ !== 'development' &&
+      __RELEASE_CHANNEL__ !== 'test'
+    ) {
+      setInterval(() => this.checkForUpdates(true), UpdateCheckInterval)
+      this.checkForUpdates(true)
+    }
 
     log.info(`launching: ${getVersion()} (${getOS()})`)
     log.info(`execPath: '${process.execPath}'`)
@@ -326,7 +315,8 @@ export class App extends React.Component<IAppProps, IAppState> {
     if (
       __DEV__ === false &&
       this.state.askToMoveToApplicationsFolderSetting &&
-      remote.app.isInApplicationsFolder?.() === false
+      __DARWIN__ &&
+      (await isInApplicationFolder()) === false
     ) {
       this.showPopup({ type: PopupType.MoveToApplicationsFolder })
     }
@@ -421,6 +411,8 @@ export class App extends React.Component<IAppProps, IAppState> {
         return this.showStashedChanges()
       case 'hide-stashed-changes':
         return this.hideStashedChanges()
+      case 'test-show-notification':
+        return this.testShowNotification()
       case 'test-prune-branches':
         return this.testPruneBranches()
       case 'find-text':
@@ -491,6 +483,21 @@ export class App extends React.Component<IAppProps, IAppState> {
     }
   }
 
+  private testShowNotification() {
+    if (
+      __RELEASE_CHANNEL__ !== 'development' &&
+      __RELEASE_CHANNEL__ !== 'test'
+    ) {
+      return
+    }
+
+    showNotification(
+      'Test notification',
+      'Click here! This is a test notification',
+      () => this.props.dispatcher.showPopup({ type: PopupType.About })
+    )
+  }
+
   private testPruneBranches() {
     if (!__DEV__) {
       return
@@ -516,7 +523,7 @@ export class App extends React.Component<IAppProps, IAppState> {
       document.activeElement != null &&
       document.activeElement.dispatchEvent(event)
     ) {
-      remote.getCurrentWebContents().selectAll()
+      selectAllWindowContents()
     }
   }
 
@@ -543,7 +550,7 @@ export class App extends React.Component<IAppProps, IAppState> {
   }
 
   private boomtown() {
-    setAlmostImmediate(() => {
+    setImmediate(() => {
       throw new Error('Boomtown!')
     })
   }
@@ -554,14 +561,7 @@ export class App extends React.Component<IAppProps, IAppState> {
   }
 
   private checkForUpdates(inBackground: boolean) {
-    if (__LINUX__) {
-      return
-    }
-
-    if (
-      __RELEASE_CHANNEL__ === 'development' ||
-      __RELEASE_CHANNEL__ === 'test'
-    ) {
+    if (__LINUX__ || __RELEASE_CHANNEL__ === 'development') {
       return
     }
 
@@ -1145,13 +1145,7 @@ export class App extends React.Component<IAppProps, IAppState> {
   private viewRepositoryOnGitHub() {
     const repository = this.getRepository()
 
-    if (repository instanceof Repository) {
-      const url = getGitHubHtmlUrl(repository)
-
-      if (url) {
-        this.props.dispatcher.openInBrowser(url)
-      }
-    }
+    this.viewOnGitHub(repository)
   }
 
   /** Returns the URL to the current repository if hosted on GitHub */
@@ -1409,6 +1403,7 @@ export class App extends React.Component<IAppProps, IAppState> {
             uncommittedChangesStrategy={this.state.uncommittedChangesStrategy}
             selectedExternalEditor={this.state.selectedExternalEditor}
             useWindowsOpenSSH={this.state.useWindowsOpenSSH}
+            notificationsEnabled={this.state.notificationsEnabled}
             optOutOfUsageTracking={this.state.optOutOfUsageTracking}
             enterpriseAccount={this.getEnterpriseAccount()}
             repository={repository}
@@ -2049,8 +2044,63 @@ export class App extends React.Component<IAppProps, IAppState> {
           />
         )
       }
+      case PopupType.PullRequestChecksFailed: {
+        return (
+          <PullRequestChecksFailed
+            key="pull-request-checks-failed"
+            dispatcher={this.props.dispatcher}
+            shouldChangeRepository={popup.needsSelectRepository}
+            repository={popup.repository}
+            pullRequest={popup.pullRequest}
+            commitMessage={popup.commitMessage}
+            commitSha={popup.commitSha}
+            checks={popup.checks}
+            accounts={this.state.accounts}
+            onSubmit={onPopupDismissedFn}
+            onDismissed={onPopupDismissedFn}
+          />
+        )
+      }
+      case PopupType.CICheckRunRerun: {
+        return (
+          <CICheckRunRerunDialog
+            key="rerun-check-runs"
+            checkRuns={popup.checkRuns}
+            dispatcher={this.props.dispatcher}
+            repository={popup.repository}
+            prRef={popup.prRef}
+            onDismissed={onPopupDismissedFn}
+          />
+        )
+      }
+      case PopupType.WarnForcePush: {
+        const { askForConfirmationOnForcePush } = this.state
+        return (
+          <WarnForcePushDialog
+            key="warn-force-push"
+            dispatcher={this.props.dispatcher}
+            operation={popup.operation}
+            askForConfirmationOnForcePush={askForConfirmationOnForcePush}
+            onBegin={this.getWarnForcePushDialogOnBegin(
+              popup.onBegin,
+              onPopupDismissedFn
+            )}
+            onDismissed={onPopupDismissedFn}
+          />
+        )
+      }
       default:
         return assertNever(popup, `Unknown popup type: ${popup}`)
+    }
+  }
+
+  private getWarnForcePushDialogOnBegin(
+    onBegin: () => void,
+    onPopupDismissedFn: () => void
+  ) {
+    return () => {
+      onBegin()
+      onPopupDismissedFn()
     }
   }
 
@@ -2265,6 +2315,7 @@ export class App extends React.Component<IAppProps, IAppState> {
           this.state.askForConfirmationOnRepositoryRemoval
         }
         onRemoveRepository={this.removeRepository}
+        onViewOnGitHub={this.viewOnGitHub}
         onOpenInShell={this.openInShell}
         onShowRepository={this.showRepository}
         onOpenInExternalEditor={this.openInExternalEditor}
@@ -2273,6 +2324,20 @@ export class App extends React.Component<IAppProps, IAppState> {
         dispatcher={this.props.dispatcher}
       />
     )
+  }
+
+  private viewOnGitHub = (
+    repository: Repository | CloningRepository | null
+  ) => {
+    if (!(repository instanceof Repository)) {
+      return
+    }
+
+    const url = getGitHubHtmlUrl(repository)
+
+    if (url) {
+      this.props.dispatcher.openInBrowser(url)
+    }
   }
 
   private openInShell = (repository: Repository | CloningRepository) => {
@@ -2356,11 +2421,13 @@ export class App extends React.Component<IAppProps, IAppState> {
 
     const tooltip = repository && !isOpen ? repository.path : undefined
 
+    const foldoutWidth = clamp(this.state.sidebarWidth)
+
     const foldoutStyle: React.CSSProperties = {
       position: 'absolute',
       marginLeft: 0,
-      width: this.state.sidebarWidth,
-      minWidth: this.state.sidebarWidth,
+      width: foldoutWidth,
+      minWidth: foldoutWidth,
       height: '100%',
       top: 0,
     }
@@ -2515,6 +2582,8 @@ export class App extends React.Component<IAppProps, IAppState> {
         shouldNudge={
           this.state.currentOnboardingTutorialStep === TutorialStep.CreateBranch
         }
+        showCIStatusPopover={this.state.showCIStatusPopover}
+        emoji={this.state.emoji}
       />
     )
   }
@@ -2573,12 +2642,11 @@ export class App extends React.Component<IAppProps, IAppState> {
       return null
     }
 
+    const width = clamp(this.state.sidebarWidth)
+
     return (
       <Toolbar id="desktop-app-toolbar">
-        <div
-          className="sidebar-section"
-          style={{ width: this.state.sidebarWidth }}
-        >
+        <div className="sidebar-section" style={{ width }}>
           {this.renderRepositoryToolbarButton()}
         </div>
         {this.renderBranchToolbarButton()}

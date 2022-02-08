@@ -33,11 +33,7 @@ const commonConfig: webpack.Configuration = {
         include: path.resolve(__dirname, 'src'),
         use: [
           {
-            loader: 'awesome-typescript-loader',
-            options: {
-              useBabel: true,
-              useCache: true,
-            },
+            loader: 'ts-loader',
           },
         ],
         exclude: /node_modules/,
@@ -220,14 +216,9 @@ highlighter.module!.rules = [
     include: path.resolve(__dirname, 'src/highlighter'),
     use: [
       {
-        loader: 'awesome-typescript-loader',
+        loader: 'ts-loader',
         options: {
-          useBabel: true,
-          useCache: true,
-          configFileName: path.resolve(
-            __dirname,
-            'src/highlighter/tsconfig.json'
-          ),
+          configFile: path.resolve(__dirname, 'src/highlighter/tsconfig.json'),
         },
       },
     ],

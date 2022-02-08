@@ -18,6 +18,7 @@ import { Loading } from '../lib/loading'
 import { AuthorInput } from '../lib/author-input'
 import { FocusContainer } from '../lib/focus-container'
 import { Octicon } from '../octicons'
+import * as OcticonSymbol from '../octicons/octicons.generated'
 import { IAuthor } from '../../models/author'
 import { IMenuItem } from '../../lib/menu-item'
 import { Commit, ICommitContext } from '../../models/commit'
@@ -26,7 +27,7 @@ import { CommitWarning, CommitWarningIcon } from './commit-warning'
 import { LinkButton } from '../lib/link-button'
 import { FoldoutType } from '../../lib/app-state'
 import { IAvatarUser, getAvatarUserFromAuthor } from '../../models/avatar'
-import { showContextualMenu } from '../main-process-proxy'
+import { showContextualMenu } from '../../lib/menu-item'
 import { Account } from '../../models/account'
 import { CommitMessageAvatar } from './commit-message-avatar'
 import { getDotComAPIEndpoint } from '../../lib/api'
@@ -35,6 +36,10 @@ import { setGlobalConfigValue } from '../../lib/git/config'
 import { PopupType } from '../../models/popup'
 import { RepositorySettingsTab } from '../repository-settings/repository-settings'
 import { isAccountEmail } from '../../lib/is-account-email'
+import { IdealSummaryLength } from '../../lib/wrap-rich-text-commit-message'
+import { isEmptyOrWhitespace } from '../../lib/is-empty-or-whitespace'
+import { TooltippedContent } from '../lib/tooltipped-content'
+import { TooltipDirection } from '../lib/tooltip'
 
 const addAuthorIcon = {
   w: 18,
@@ -52,7 +57,13 @@ interface ICommitMessageProps {
   readonly onCreateCommit: (context: ICommitContext) => Promise<boolean>
   readonly branch: string | null
   readonly commitAuthor: CommitIdentity | null
-  readonly anyFilesSelected?: boolean
+  readonly anyFilesSelected: boolean
+
+  /**
+   * Whether it's possible to select files for commit, affects messaging
+   * when commit button is disabled
+   */
+  readonly anyFilesAvailable: boolean
   readonly focusCommitMessage: boolean
   readonly commitMessage: ICommitMessage | null
   readonly repository: Repository
@@ -285,8 +296,14 @@ export class CommitMessage extends React.Component<
     }))
   }
 
+  private get summaryOrPlaceholder() {
+    return this.props.prepopulateCommitSummary && !this.state.summary
+      ? this.props.placeholder
+      : this.state.summary
+  }
+
   private async createCommit() {
-    const { summary, description } = this.state
+    const { description } = this.state
 
     if (!this.canCommit() && !this.canAmend()) {
       return
@@ -294,13 +311,8 @@ export class CommitMessage extends React.Component<
 
     const trailers = this.getCoAuthorTrailers()
 
-    const summaryOrPlaceholder =
-      this.props.prepopulateCommitSummary && !this.state.summary
-        ? this.props.placeholder
-        : summary
-
     const commitContext = {
-      summary: summaryOrPlaceholder,
+      summary: this.summaryOrPlaceholder,
       description,
       trailers,
       amend: this.props.commitToAmend !== null,
@@ -344,9 +356,11 @@ export class CommitMessage extends React.Component<
   private renderAvatar() {
     const { commitAuthor, repository } = this.props
     const { gitHubRepository } = repository
-    const avatarTitle = commitAuthor
-      ? `Committing as ${commitAuthor.name} <${commitAuthor.email}>`
-      : undefined
+    const avatarTitle = commitAuthor ? (
+      <>
+        Committing as <strong>{commitAuthor.name}</strong> {commitAuthor.email}
+      </>
+    ) : undefined
     const avatarUser: IAvatarUser | undefined =
       commitAuthor !== null
         ? getAvatarUserFromAuthor(commitAuthor, gitHubRepository)
@@ -661,47 +675,44 @@ export class CommitMessage extends React.Component<
   }
 
   private onStopAmending = () => {
-    this.props.dispatcher.setAmendingRepository(this.props.repository, false)
+    this.props.dispatcher.stopAmendingRepository(this.props.repository)
   }
 
   private renderSubmitButton() {
-    const { isCommitting } = this.props
-    const isSummaryWhiteSpace = this.state.summary.match(/^\s+$/g)
+    const { isCommitting, branch, commitButtonText } = this.props
+    const isSummaryBlank = isEmptyOrWhitespace(this.summaryOrPlaceholder)
     const buttonEnabled =
-      (this.canCommit() || this.canAmend()) &&
-      isCommitting !== true &&
-      !isSummaryWhiteSpace
+      (this.canCommit() || this.canAmend()) && !isCommitting && !isSummaryBlank
 
-    return (
-      <Button
-        type="submit"
-        className="commit-button"
-        onClick={this.onSubmit}
-        disabled={!buttonEnabled}
-      >
-        {this.renderButtonContents()}
-      </Button>
-    )
-  }
-
-  private renderButtonContents(): JSX.Element {
-    const { isCommitting, branch: branchName, commitButtonText } = this.props
-
-    const loading = isCommitting === true ? <Loading /> : undefined
+    const loading = isCommitting ? <Loading /> : undefined
 
     const isAmending = this.props.commitToAmend !== null
 
-    const amendVerb = loading ? 'Amending' : 'Amend'
-    const commitVerb = loading ? 'Committing' : 'Commit'
+    const amendVerb = isCommitting ? 'Amending' : 'Amend'
+    const commitVerb = isCommitting ? 'Committing' : 'Commit'
 
     const amendTitle = `${amendVerb} last commit`
     const commitTitle =
-      branchName !== null ? `${commitVerb} to ${branchName}` : commitVerb
+      branch !== null ? `${commitVerb} to ${branch}` : commitVerb
+
+    let tooltip: string | undefined = undefined
+
+    if (buttonEnabled) {
+      tooltip = isAmending ? amendTitle : commitTitle
+    } else {
+      if (isSummaryBlank) {
+        tooltip = `A commit summary is required to commit`
+      } else if (!this.props.anyFilesSelected && this.props.anyFilesAvailable) {
+        tooltip = `Select one or more files to commit`
+      } else if (isCommitting) {
+        tooltip = `Committing changes…`
+      }
+    }
 
     const defaultCommitContents =
-      branchName !== null ? (
+      branch !== null ? (
         <>
-          {commitVerb} to <strong>{branchName}</strong>
+          {commitVerb} to <strong>{branch}</strong>
         </>
       ) : (
         commitVerb
@@ -716,17 +727,47 @@ export class CommitMessage extends React.Component<
     const commitButton = commitButtonText ? commitButtonText : defaultContents
 
     return (
-      <>
-        {loading}
-        <span title={isAmending ? amendTitle : commitTitle}>
+      <Button
+        type="submit"
+        className="commit-button"
+        onClick={this.onSubmit}
+        disabled={!buttonEnabled}
+        tooltip={tooltip}
+        onlyShowTooltipWhenOverflowed={buttonEnabled}
+      >
+        <>
+          {loading}
           {commitButton}
-        </span>
-      </>
+        </>
+      </Button>
+    )
+  }
+
+  private renderSummaryLengthHint(): JSX.Element | null {
+    return (
+      <TooltippedContent
+        delay={0}
+        tooltip={
+          <>
+            <div className="title">
+              Great commit summaries contain fewer than 50 characters
+            </div>
+            <div className="description">
+              Place extra information in the description field.
+            </div>
+          </>
+        }
+        direction={TooltipDirection.NORTH}
+        className="length-hint"
+        tooltipClassName="length-hint-tooltip"
+      >
+        <Octicon symbol={OcticonSymbol.lightBulb} />
+      </TooltippedContent>
     )
   }
 
   public render() {
-    const className = classNames({
+    const className = classNames('commit-message-component', {
       'with-action-bar': this.isActionBarEnabled,
       'with-co-authors': this.isCoAuthorInputVisible,
     })
@@ -735,20 +776,23 @@ export class CommitMessage extends React.Component<
       'with-overflow': this.state.descriptionObscured,
     })
 
+    const showSummaryLengthHint = this.state.summary.length > IdealSummaryLength
+    const summaryClassName = classNames('summary', {
+      'with-length-hint': showSummaryLengthHint,
+    })
     const summaryInputClassName = classNames('summary-field', 'nudge-arrow', {
       'nudge-arrow-left': this.props.shouldNudge === true,
     })
 
     return (
       <div
-        id="commit-message"
         role="group"
         aria-label="Create commit"
         className={className}
         onContextMenu={this.onContextMenu}
         onKeyDown={this.onKeyDown}
       >
-        <div className="summary">
+        <div className={summaryClassName}>
           {this.renderAvatar()}
 
           <AutocompletingInput
@@ -763,6 +807,7 @@ export class CommitMessage extends React.Component<
             disabled={this.props.isCommitting === true}
             spellcheck={this.props.commitSpellcheckEnabled}
           />
+          {showSummaryLengthHint && this.renderSummaryLengthHint()}
         </div>
 
         <FocusContainer

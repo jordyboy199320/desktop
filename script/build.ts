@@ -40,6 +40,7 @@ import {
   getExecutableName,
   isPublishable,
   getIconFileName,
+  getDistArchitecture,
 } from './dist-info'
 import { isCircleCI, isGitHubActions } from './build-platforms'
 
@@ -272,60 +273,27 @@ function moveAnalysisFiles() {
 }
 
 function copyDependencies() {
-  const originalPackage: Package = require(path.join(
-    projectRoot,
-    'app',
-    'package.json'
-  ))
+  const pkg: Package = require(path.join(projectRoot, 'app', 'package.json'))
 
-  const oldDependencies = originalPackage.dependencies
-  const newDependencies: PackageLookup = {}
-
-  for (const name of Object.keys(oldDependencies)) {
-    const spec = oldDependencies[name]
-    if (externals.indexOf(name) !== -1) {
-      newDependencies[name] = spec
-    }
-  }
-
-  const oldDevDependencies = originalPackage.devDependencies
-  const newDevDependencies: PackageLookup = {}
-
-  if (isDevelopmentBuild) {
-    for (const name of Object.keys(oldDevDependencies)) {
-      const spec = oldDevDependencies[name]
-      if (externals.indexOf(name) !== -1) {
-        newDevDependencies[name] = spec
-      }
-    }
-  }
+  const filterExternals = (dependencies: Record<string, string>) =>
+    Object.fromEntries(
+      Object.entries(dependencies).filter(([k]) => externals.includes(k))
+    )
 
   // The product name changes depending on whether it's a prod build or dev
   // build, so that we can have them running side by side.
-  const updatedPackage = Object.assign({}, originalPackage, {
-    productName: getProductName(),
-    dependencies: newDependencies,
-    devDependencies: newDevDependencies,
-  })
+  pkg.productName = getProductName()
+  pkg.dependencies = filterExternals(pkg.dependencies)
+  pkg.devDependencies =
+    isDevelopmentBuild && pkg.devDependencies
+      ? filterExternals(pkg.devDependencies)
+      : {}
 
-  if (!isDevelopmentBuild) {
-    delete updatedPackage.devDependencies
-  }
-
-  fs.writeFileSync(
-    path.join(outRoot, 'package.json'),
-    JSON.stringify(updatedPackage)
-  )
-
+  fs.writeFileSync(path.join(outRoot, 'package.json'), JSON.stringify(pkg))
   fs.removeSync(path.resolve(outRoot, 'node_modules'))
 
-  if (
-    Object.keys(newDependencies).length ||
-    Object.keys(newDevDependencies).length
-  ) {
-    console.log('  Installing dependencies via yarn…')
-    cp.execSync('yarn install', { cwd: outRoot, env: process.env })
-  }
+  console.log('  Installing dependencies via yarn…')
+  cp.execSync('yarn install', { cwd: outRoot, env: process.env })
 
   console.log('  Copying desktop-trampoline…')
   const desktopTrampolineDir = path.resolve(outRoot, 'desktop-trampoline')
@@ -376,9 +344,11 @@ function copyDependencies() {
       'Microsoft.Vsts.Authentication.dll',
       'git-askpass.exe',
       'git-credential-manager.exe',
+      'WebView2Loader.dll',
     ]
 
-    const gitCoreDir = path.join(gitDir, 'mingw64', 'libexec', 'git-core')
+    const mingwFolder = getDistArchitecture() === 'x64' ? 'mingw64' : 'mingw32'
+    const gitCoreDir = path.join(gitDir, mingwFolder, 'libexec', 'git-core')
 
     for (const file of files) {
       const filePath = path.join(gitCoreDir, file)

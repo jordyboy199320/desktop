@@ -11,10 +11,11 @@ jobs:
   build:
     name: ${{ matrix.friendlyName }} ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
+    permissions: read-all
     strategy:
       fail-fast: false
       matrix:
-        node: [14.15.4]
+        node: [16.9.1]
         os: [macos-10.15, windows-2019]
         arch: [x64, arm64]
         include:
@@ -86,10 +87,6 @@ jobs:
       - name: Run script tests
         if: matrix.arch == 'x64'
         run: yarn test:script:cov
-      - name: Run integration tests
-        if: matrix.arch == 'x64'
-        timeout-minutes: 5
-        run: yarn test:integration
       - name: Publish production app
         run: yarn run publish
         env:
