@@ -42,7 +42,7 @@ const TokenNames: { [key: string]: DiffSyntaxToken | null } = {
 interface IState {
   diffLineIndex: number
   previousHunkOldEndLine: number | null
-  prevLineTokenIndex: string | null
+  prevLineTokenIndex: string | undefined
 }
 
 function skipLine(stream: CodeMirror.StringStream, state: IState) {
@@ -64,8 +64,8 @@ function getBaseDiffLineStyle(
 
 function getDiffLineBackgroundClassNames(
   tokenIndex: string,
-  prevTokenIndex: string | null,
-  nextTokenIndex: string | null
+  prevTokenIndex: string | undefined,
+  nextTokenIndex: string | undefined
 ): string[] {
   const addDeleteTokens = ['+', '-']
   if (!addDeleteTokens.includes(tokenIndex)) {
@@ -74,11 +74,11 @@ function getDiffLineBackgroundClassNames(
 
   const classNames = []
 
-  if (prevTokenIndex === null || prevTokenIndex !== tokenIndex) {
+  if (prevTokenIndex !== tokenIndex) {
     classNames.push('is-first')
   }
 
-  if (nextTokenIndex === null || nextTokenIndex !== tokenIndex) {
+  if (nextTokenIndex !== tokenIndex) {
     classNames.push('is-last')
   }
 
@@ -149,7 +149,7 @@ export class DiffSyntaxMode {
     return {
       diffLineIndex: 0,
       previousHunkOldEndLine: null,
-      prevLineTokenIndex: null,
+      prevLineTokenIndex: undefined,
     }
   }
 
@@ -202,7 +202,8 @@ export class DiffSyntaxMode {
       }
 
       const nextLine = stream.lookAhead(1)
-      const nextLineTokenIndex = nextLine !== undefined ? nextLine[0] : null
+      const nextLineTokenIndex =
+        typeof nextLine === `string` ? nextLine[0] : undefined
       const lineBackgroundClassNames = getDiffLineBackgroundClassNames(
         index,
         state.prevLineTokenIndex,
