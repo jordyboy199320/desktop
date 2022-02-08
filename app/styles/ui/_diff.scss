@@ -278,7 +278,6 @@
     border-right: var(--diff-add-border);
     border-left: var(--diff-add-border);
 
-
     &.is-first {
       margin-top: 1px;
       border-top: var(--diff-add-border);
@@ -306,6 +305,7 @@
 
     &.is-last {
       border-bottom: var(--diff-delete-border);
+    }
 
     @include high-contrast {
       border: var(--hc-diff-delete-border);
